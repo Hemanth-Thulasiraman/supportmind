@@ -36,3 +36,4 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+mlflow.db
