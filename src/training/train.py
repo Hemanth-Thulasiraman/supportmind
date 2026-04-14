@@ -174,7 +174,7 @@ def run_training(
             greater_is_better=False,
             seed=config.seed,
             dataset_text_field="text",
-            max_seq_length=config.max_seq_length,
+            max_length=config.max_seq_length,
             report_to="none",
         )
 
