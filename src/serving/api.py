@@ -3,6 +3,8 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from loguru import logger
+import time
+from src.monitoring.logger import log_prediction
 
 from src.serving.model import (
     load_model,
@@ -57,13 +59,11 @@ def health_check():
 def predict(request: TicketRequest):
     """
     Classifies intent and generates response for a support ticket.
-
-    Input: customer support ticket text (10-2000 characters)
-    Output: predicted intent, generated response, confidence level
+    Logs every prediction for monitoring.
     """
-    logger.info(
-        f"Predicting for ticket: {request.ticket[:50]}..."
-    )
+    logger.info(f"Predicting: {request.ticket[:50]}...")
+
+    start_time = time.time()
 
     try:
         result = run_inference(request.ticket)
@@ -80,9 +80,33 @@ def predict(request: TicketRequest):
             detail=f"Inference error: {str(e)}"
         )
 
+    latency_ms = (time.time() - start_time) * 1000
+
+    # Log every prediction for monitoring
+    log_prediction(
+        ticket=request.ticket,
+        intent=result["intent"],
+        response=result["response"],
+        confidence=result["confidence"],
+        latency_ms=latency_ms,
+    )
+
     logger.info(
-        f"Predicted intent: {result['intent']} "
-        f"(confidence: {result['confidence']})"
+        f"Intent: {result['intent']} "
+        f"confidence: {result['confidence']} "
+        f"latency: {latency_ms:.0f}ms"
     )
 
     return TicketResponse(**result)
+
+
+# Add monitoring endpoint
+@app.get("/monitoring/report")
+def monitoring_report():
+    """
+    Runs monitoring checks on prediction logs.
+    Returns confidence, distribution, and latency analysis.
+    """
+    from src.monitoring.drift import run_monitoring_report
+    report = run_monitoring_report()
+    return report
