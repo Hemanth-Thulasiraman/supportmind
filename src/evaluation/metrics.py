@@ -8,7 +8,6 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
 )
-from typing import Optional
 
 
 def compute_intent_f1(
@@ -18,30 +17,32 @@ def compute_intent_f1(
     """
     Computes macro F1, weighted F1, and per-class F1
     for intent classification.
-    Returns a dict of metrics.
     """
     macro_f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
-    weighted_f1 = f1_score(y_true, y_pred, average="weighted", zero_division=0)
-    
-    # Per-class F1
+    weighted_f1 = f1_score(
+        y_true, y_pred, average="weighted", zero_division=0
+    )
+
     report = classification_report(
-        y_true, y_pred,
-        output_dict=True,
-        zero_division=0
+        y_true, y_pred, output_dict=True, zero_division=0
     )
 
     logger.info(f"Macro F1:    {macro_f1:.4f}")
     logger.info(f"Weighted F1: {weighted_f1:.4f}")
 
-    # Log bottom 5 worst performing intents
     per_class = {
         k: v["f1-score"]
         for k, v in report.items()
         if k not in ["accuracy", "macro avg", "weighted avg"]
     }
     sorted_classes = sorted(per_class.items(), key=lambda x: x[1])
+
     logger.info("5 worst performing intents:")
     for intent, f1 in sorted_classes[:5]:
+        logger.info(f"  {intent:<40} F1={f1:.4f}")
+
+    logger.info("5 best performing intents:")
+    for intent, f1 in sorted_classes[-5:]:
         logger.info(f"  {intent:<40} F1={f1:.4f}")
 
     return {
@@ -59,7 +60,6 @@ def compute_confusion_matrix(
 ) -> pd.DataFrame:
     """
     Computes confusion matrix as a labeled DataFrame.
-    Useful for identifying which intents get confused with each other.
     """
     cm = confusion_matrix(y_true, y_pred, labels=labels)
     df_cm = pd.DataFrame(cm, index=labels, columns=labels)
@@ -67,81 +67,88 @@ def compute_confusion_matrix(
     return df_cm
 
 
-def compute_bert_score(
+def compute_rouge(
     predictions: list[str],
     references: list[str],
-    sample_size: int = 200,
 ) -> dict:
     """
-    Computes BERTScore for generated responses vs reference responses.
-    Samples a subset for speed — full BERTScore on 2688 examples is slow.
-    Returns mean precision, recall, F1.
+    Computes ROUGE-1 and ROUGE-L for generated responses.
+    More reliable than BERTScore across library versions.
     """
     try:
-        from bert_score import score as bert_score_fn
-    except ImportError:
-        logger.warning("bert_score not installed — skipping BERTScore")
+        import evaluate as hf_evaluate
+        rouge = hf_evaluate.load("rouge")
+        results = rouge.compute(
+            predictions=predictions,
+            references=references,
+        )
+        logger.info(f"ROUGE-1: {results['rouge1']:.4f}")
+        logger.info(f"ROUGE-L: {results['rougeL']:.4f}")
+        return results
+    except Exception as e:
+        logger.warning(f"ROUGE computation failed: {e}")
         return {}
 
-    # Sample for speed
-    if len(predictions) > sample_size:
-        indices = np.random.choice(
-            len(predictions), sample_size, replace=False
-        )
-        predictions = [predictions[i] for i in indices]
-        references = [references[i] for i in indices]
-        logger.info(f"BERTScore: sampling {sample_size} examples for speed")
 
-    logger.info("Computing BERTScore — this takes 1-2 minutes...")
-    P, R, F1 = bert_score_fn(
-        predictions,
-        references,
-        lang="en",
-        verbose=False,
-    )
-
-    results = {
-        "bertscore_precision": P.mean().item(),
-        "bertscore_recall": R.mean().item(),
-        "bertscore_f1": F1.mean().item(),
-    }
-
-    logger.info(f"BERTScore Precision: {results['bertscore_precision']:.4f}")
-    logger.info(f"BERTScore Recall:    {results['bertscore_recall']:.4f}")
-    logger.info(f"BERTScore F1:        {results['bertscore_f1']:.4f}")
-
-    return results
-
-
-def extract_intent_from_output(model_output: str) -> str:
+def extract_intent_from_output(
+    model_output: str,
+    valid_intents: list[str] = None,
+) -> str:
     """
-    Parses raw model output to extract the intent label.
-    Model output format:
-        'Intent: cancel_order\\nResponse: ...'
-    Returns the intent string or 'unknown' if parsing fails.
+    Robust parser for model output.
+    Handles three formats the model might generate:
+    1. 'Intent: cancel_order\\nResponse: ...'
+    2. 'cancel_order\\nResponse: ...'  (no prefix — our model does this)
+    3. Intent label appears in first 50 chars
     """
-    try:
-        lines = model_output.strip().split("\n")
-        for line in lines:
-            if line.startswith("Intent:"):
-                intent = line.replace("Intent:", "").strip()
+    if not model_output or not model_output.strip():
+        return "unknown"
+
+    text = model_output.strip()
+
+    # Strategy 1 — Look for "Intent: X" prefix
+    for line in text.split("\n"):
+        line = line.strip()
+        if line.lower().startswith("intent:"):
+            intent = line.split(":", 1)[1].strip()
+            intent = intent.split("(")[0].strip()
+            intent = intent.lower().replace(" ", "_").replace("-", "_")
+            if intent:
                 return intent
-    except Exception:
-        pass
+
+    # Strategy 2 — First line IS the intent (no prefix)
+    # Our model does this: 'cancel_order\nResponse: ...'
+    first_line = text.split("\n")[0].strip()
+    normalized = first_line.lower().replace(" ", "_").replace("-", "_")
+    if valid_intents and normalized in valid_intents:
+        return normalized
+
+    # Strategy 3 — Valid intent appears in first 50 chars
+    if valid_intents:
+        text_start = text[:50].lower()
+        for intent in valid_intents:
+            if intent in text_start:
+                return intent
+
     return "unknown"
 
 
 def extract_response_from_output(model_output: str) -> str:
     """
-    Parses raw model output to extract the generated response.
-    Returns the response string or empty string if parsing fails.
+    Extracts generated response from model output.
+    Handles both 'Response:' prefix and plain text formats.
     """
+    if not model_output:
+        return ""
     try:
         if "Response:" in model_output:
             response = model_output.split("Response:", 1)[1].strip()
-            # Remove </s> end token if present
             response = response.replace("</s>", "").strip()
             return response
+        # Fallback: return everything after first line
+        lines = model_output.strip().split("\n")
+        if len(lines) > 1:
+            return "\n".join(lines[1:]).strip()
     except Exception:
         pass
     return ""
