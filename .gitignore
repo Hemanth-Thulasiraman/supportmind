@@ -11,6 +11,8 @@ env/
 data/raw/*
 data/processed/*
 data/validation_reports/*
+!data/validation_reports/eval_report.json
+!data/validation_reports/confusion_matrix.csv
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/validation_reports/.gitkeep
