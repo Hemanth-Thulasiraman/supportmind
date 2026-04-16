@@ -1,0 +1,14 @@
+venv/
+.env
+*.env
+__pycache__/
+*.py[cod]
+.git/
+data/raw/
+data/monitoring/
+models/
+mlruns/
+mlflow.db
+notebooks/
+tests/
+*.md
