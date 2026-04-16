@@ -147,38 +147,6 @@ curl http://localhost:8000/health
 
 ---
 
-## Project Structure
-supportmind/
-├── src/
-│   ├── data/
-│   │   ├── ingest.py        # HuggingFace dataset download + validation
-│   │   ├── validate.py      # Schema, null, distribution checks
-│   │   └── preprocess.py    # Prompt formatting + stratified splits
-│   ├── training/
-│   │   ├── config.py        # Pydantic hyperparameter config
-│   │   └── train.py         # LoRA fine-tuning with SFTTrainer
-│   ├── evaluation/
-│   │   ├── metrics.py       # F1, ROUGE, confusion matrix, parsers
-│   │   └── evaluate.py      # Full test set evaluation pipeline
-│   ├── serving/
-│   │   ├── api.py           # FastAPI application
-│   │   ├── model.py         # Model loader and inference
-│   │   └── schemas.py       # Pydantic request/response models
-│   └── monitoring/
-│       ├── logger.py        # Prediction logging to JSONL
-│       └── drift.py         # Distribution shift + latency monitoring
-├── configs/                 # Training configuration files
-├── data/
-│   ├── raw/                 # Raw dataset (gitignored)
-│   ├── processed/           # Train/val/test splits (gitignored)
-│   └── validation_reports/  # Evaluation reports
-├── models/                  # LoRA adapter weights (gitignored)
-├── Dockerfile
-├── requirements.txt
-└── README.md
-
----
-
 ## Key Engineering Decisions
 
 **Why LoRA over full fine-tuning?**
